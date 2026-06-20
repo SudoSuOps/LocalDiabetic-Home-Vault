@@ -102,7 +102,8 @@ Each reminder in `reminders.json`:
 | `nudge` | The **only** text allowed to leave the box. Keep it generic — no meds, doses, or numbers. |
 | `schedule` | When it fires (see below). |
 | `vault_ref` | Pointer to the vault file with the detail. Stays local. |
-| `channels` | Where it goes: `console`, `file` (on-box log), `webhook` (off-box phone/watch). |
+| `channels` | Where it goes: `console`, `file` (on-box log), `webhook` (off-box phone/watch via ntfy), `email` (off-box copy via Resend). |
+| `email_to` | Recipient for the `email` channel (or set `LD_EMAIL_TO` for all). |
 | `phi_sensitive` | `true` = extra care; the title/detail never leave the box. |
 | `grace_hours` | If the box was off at the scheduled time, still fire up to N hours late (default 12). |
 | `webhook_url` | Per-reminder webhook (or set `LD_WEBHOOK_URL` env for all). |
@@ -151,6 +152,21 @@ generic nudge text with a generic `LocalDiabetic` title — never PHI.
 
 Don't want anything leaving the box at all? Drop `webhook` from `channels`. The console
 and on-box log still work. **Local-only is a fully supported mode.**
+
+### Email copy (Resend)
+
+Add `email` to a reminder's `channels` for a durable email copy of the generic nudge.
+Secrets stay in the environment, never in the config file:
+
+```bash
+export RESEND_API_KEY="re_..."                               # required
+export LD_EMAIL_FROM="LocalDiabetic <build@opendiabetic.com>"  # verified Resend domain
+export LD_EMAIL_TO="build@opendiabetic.com"                  # or per-reminder "email_to"
+```
+
+The email carries only a generic subject (`LocalDiabetic reminder`) and the generic
+nudge body — same PHI backstop as every off-box channel. Sending from your own domain
+requires that domain verified in Resend; for a quick test, `onboarding@resend.dev` works.
 
 ---
 

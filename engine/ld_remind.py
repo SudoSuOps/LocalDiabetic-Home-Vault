@@ -76,7 +76,7 @@ RECEIPTS_DIR = os.path.join(VAULT_ROOT, "14-receipts")
 WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
 # Off-box channels carry only declared generic text — never title/detail.
-OFF_BOX_CHANNELS = {"webhook"}
+OFF_BOX_CHANNELS = {"webhook", "email"}
 
 # A backstop scan. The real protection is that the engine never loads PHI;
 # this just flags an author who accidentally put detail in a generic message.
@@ -221,7 +221,33 @@ def ch_webhook(reminder, _on_box_text):
     return post_webhook(url, reminder["nudge"])
 
 
-CHANNELS = {"console": ch_console, "file": ch_file, "webhook": ch_webhook}
+def ch_email(reminder, _on_box_text):
+    """
+    Off-box email copy via Resend. Sends ONLY the generic nudge (generic
+    subject + body) — never title/detail/pointer. Secrets come from the
+    environment so they never live in a config file:
+        RESEND_API_KEY   (required)   the Resend API key
+        LD_EMAIL_FROM    (optional)   e.g. 'LocalDiabetic <build@opendiabetic.com>'
+        LD_EMAIL_TO      (fallback)   default recipient if reminder has no email_to
+    """
+    key = os.environ.get("RESEND_API_KEY")
+    to = reminder.get("email_to") or os.environ.get("LD_EMAIL_TO")
+    frm = os.environ.get("LD_EMAIL_FROM", "LocalDiabetic <onboarding@resend.dev>")
+    if not key or not to:
+        raise RuntimeError("email not configured (need RESEND_API_KEY + email_to/LD_EMAIL_TO)")
+    body = json.dumps({
+        "from": frm, "to": [to],
+        "subject": "LocalDiabetic reminder",   # generic, no PHI
+        "text": reminder["nudge"],             # generic nudge only
+    }).encode("utf-8")
+    req = urllib.request.Request("https://api.resend.com/emails", data=body, method="POST")
+    req.add_header("Authorization", f"Bearer {key}")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        return 200 <= resp.status < 300
+
+
+CHANNELS = {"console": ch_console, "file": ch_file, "webhook": ch_webhook, "email": ch_email}
 
 
 def dispatch(reminder, channels, now, dry_run):
@@ -330,7 +356,7 @@ def mint_fire_receipt(reminder, result, now):
         "phi_in_off_box_payload": scan_phi(result["off_box_payload"]),
         "vault_ref": result["vault_ref"],
         "diagnosis_given": False,
-        "engine": "ld_remind/0.2",
+        "engine": "ld_remind/0.3",
     }, now)
 
 
@@ -345,7 +371,7 @@ def mint_ack_receipt(rid, pending, by, now, response_min):
         "response_minutes": response_min,
         "escalated_before_ack": pending.get("escalated", False),
         "diagnosis_given": False,
-        "engine": "ld_remind/0.2",
+        "engine": "ld_remind/0.3",
     }, now)
 
 
@@ -363,7 +389,7 @@ def mint_escalation_receipt(rid, pending, esc_result, now):
         "off_box_payload": esc_result["text"],
         "phi_in_off_box_payload": esc_result["phi"],
         "diagnosis_given": False,
-        "engine": "ld_remind/0.2",
+        "engine": "ld_remind/0.3",
     }, now)
 
 
