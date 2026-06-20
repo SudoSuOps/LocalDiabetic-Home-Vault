@@ -43,6 +43,15 @@ engine/reminders.json
 engine/.state/
 !engine/reminders.example.json
 
+# Secrets + local run wrapper — NEVER commit (Resend key, email config)
+engine/secrets.env
+engine/run.sh
+*.env
+
+# Self-hosted ntfy server (binary, data, private topics) stays on the box
+engine/../ntfy/
+ntfy/
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
