@@ -198,6 +198,7 @@ def post_webhook(url, payload, title="LocalDiabetic"):
     safe_title = title.encode("ascii", "ignore").decode() or "LocalDiabetic"
     req.add_header("Title", safe_title)       # generic, no PHI
     req.add_header("Content-Type", "text/plain; charset=utf-8")
+    req.add_header("User-Agent", "LocalDiabetic-Engine/0.3")  # avoid CF UA bans
     with urllib.request.urlopen(req, timeout=4) as resp:
         return 200 <= resp.status < 300
 
@@ -243,6 +244,7 @@ def ch_email(reminder, _on_box_text):
     req = urllib.request.Request("https://api.resend.com/emails", data=body, method="POST")
     req.add_header("Authorization", f"Bearer {key}")
     req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "LocalDiabetic-Engine/0.3")  # CF blocks default urllib UA (err 1010)
     with urllib.request.urlopen(req, timeout=6) as resp:
         return 200 <= resp.status < 300
 
