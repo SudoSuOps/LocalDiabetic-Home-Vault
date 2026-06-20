@@ -126,7 +126,7 @@ STATE = os.path.join(HERE, ".state")
 LIFE_LOG = os.path.join(STATE, "life_events.jsonl")
 # the only types we accept (keeps the firewall + the UI clean)
 EVENT_TYPES = {"fridge", "help", "meds", "foot", "glucose", "safety", "device",
-               "note", "mood", "milestone", "appointment", "supply"}
+               "note", "mood", "milestone", "appointment", "supply", "journal", "voice"}
 
 
 def log_event(etype, title, message="", severity="info", source="dashboard"):
@@ -246,6 +246,31 @@ class Dash(BaseHTTPRequestHandler):
             ld_remind.acknowledge(rid, b.get("by", "me"), datetime.now())
             log_event("meds" if "med" in rid else "note", "Done ✓", f"Acknowledged: {rid}", "good", "dashboard")
             return self._json({"ok": True})
+
+        # voice (or dashboard) creates a reminder -> appends to the Nudge engine config
+        if u.path == "/api/reminder":
+            b = self._body()
+            cfgp = ld_remind.DEFAULT_CONFIG
+            try:
+                cfg = json.load(open(cfgp)) if os.path.exists(cfgp) else {"reminders": []}
+            except Exception:
+                cfg = {"reminders": []}
+            rid = (b.get("id") or f"voice-{datetime.now().strftime('%Y%m%dT%H%M%S')}")[:40]
+            rem = {"id": rid, "title": (b.get("title") or "Reminder")[:80],
+                   "nudge": (b.get("nudge") or b.get("title") or "Reminder")[:160],
+                   "schedule": b.get("schedule") or "daily@09:00",
+                   "channels": ["console", "file"], "category": b.get("category", "care"),
+                   "source": b.get("source", "voice")}
+            # honor the member's off-box channel + webhook if the config already uses one
+            for r in cfg.get("reminders", []):
+                if r.get("webhook_url"):
+                    rem["channels"] = list(dict.fromkeys(rem["channels"] + ["webhook"]))
+                    rem["webhook_url"] = r["webhook_url"]
+                    break
+            cfg.setdefault("reminders", []).append(rem)
+            json.dump(cfg, open(cfgp, "w"), indent=2)
+            log_event("note", "Reminder set", f"{rem['title']} ({rem['schedule']})", "good", b.get("source", "voice"))
+            return self._json({"ok": True, "reminder": {"id": rid, "schedule": rem["schedule"], "title": rem["title"]}})
         if u.path == "/api/carepack":
             b = self._body()
             need = (b.get("need") or "")[:80]
