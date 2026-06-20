@@ -4,6 +4,9 @@
 
 *Powered by OpenDiabetic.*
 
+> **📖 Read [WHY.md](WHY.md) first** — the founding story, in the founder's words. It's
+> why this exists, and it's the spec for every decision here.
+
 ---
 
 ## What this is
