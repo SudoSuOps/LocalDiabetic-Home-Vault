@@ -1,0 +1,71 @@
+{
+  "_comment": "Copy this file to reminders.json and edit it. reminders.json is gitignored so your schedule stays on your box. The 'nudge' field is the ONLY text that may leave the box (to a phone/watch) — keep it generic, never put a medication name, dose, or number in it. The detail lives in the vault file named by 'vault_ref', which you open on the box.",
+
+  "reminders": [
+    {
+      "id": "foot-check",
+      "title": "Daily foot check",
+      "nudge": "Time for your daily foot check 👣",
+      "schedule": "daily@08:00",
+      "vault_ref": "06-foot-care/FOOT-CHECK-CHECKLIST.md",
+      "channels": ["console", "file", "webhook"],
+      "category": "care"
+    },
+    {
+      "id": "morning-meds",
+      "title": "Morning routine",
+      "nudge": "Good morning — morning routine reminder ⏰",
+      "schedule": "daily@07:30",
+      "vault_ref": "01-medications/MEDICATION-LIST.md",
+      "channels": ["console", "file", "webhook"],
+      "category": "medication",
+      "phi_sensitive": true
+    },
+    {
+      "id": "evening-meds",
+      "title": "Evening routine",
+      "nudge": "Evening routine reminder 🌙",
+      "schedule": "daily@20:00",
+      "vault_ref": "01-medications/MEDICATION-LIST.md",
+      "channels": ["console", "file", "webhook"],
+      "category": "medication",
+      "phi_sensitive": true
+    },
+    {
+      "id": "hydrate",
+      "title": "Drink water",
+      "nudge": "Hydration check 💧",
+      "schedule": "daily@14:00",
+      "channels": ["console", "file"],
+      "category": "care"
+    },
+    {
+      "id": "supply-check",
+      "title": "Weekly supply check",
+      "nudge": "Weekly supply check — anything running low? 🛒",
+      "schedule": "weekly@SUN@18:00",
+      "vault_ref": "08-supplies/SUPPLY-INVENTORY.md",
+      "channels": ["console", "file", "webhook"],
+      "category": "supplies"
+    },
+    {
+      "id": "wound-dressing",
+      "title": "Dressing change",
+      "nudge": "Dressing-change reminder 🩹",
+      "schedule": "interval_days@2@09:00",
+      "vault_ref": "07-wound-care/WOUND-CARE-LOG.md",
+      "channels": ["console", "file"],
+      "category": "care",
+      "phi_sensitive": true
+    },
+    {
+      "id": "next-appointment",
+      "title": "Appointment tomorrow",
+      "nudge": "You have an appointment soon — prep your folder 📅",
+      "schedule": "once@2026-06-26@18:00",
+      "vault_ref": "10-appointments/APPOINTMENT-PREP.md",
+      "channels": ["console", "file", "webhook"],
+      "category": "appointment"
+    }
+  ]
+}

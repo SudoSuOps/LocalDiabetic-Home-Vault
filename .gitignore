@@ -38,6 +38,11 @@
 14-receipts/*
 !14-receipts/README.md
 
+# Reminder engine — the user's real schedule + activity stay on the box
+engine/reminders.json
+engine/.state/
+!engine/reminders.example.json
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
