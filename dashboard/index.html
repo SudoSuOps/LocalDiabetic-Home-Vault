@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My LocalDiabetic</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="hi">🐝 <b>LocalDiabetic</b> <span id="hello"></span></div>
+  <div class="a11y">
+    <button id="bigger" aria-label="Make text bigger">A+</button>
+    <button id="smaller" aria-label="Make text smaller">A−</button>
+    <button id="contrast" aria-label="Toggle high contrast">◐</button>
+  </div>
+</header>
+
+<nav class="bigtabs" aria-label="Sections">
+  <button data-tab="today" class="on">📋 Today</button>
+  <button data-tab="vault">📂 My Vault</button>
+  <button data-tab="helper">💬 Helper</button>
+  <button data-tab="care">❤️ Care</button>
+  <button data-tab="proof">🧾 My Receipts</button>
+</nav>
+
+<main id="main">
+
+  <section class="tab" id="today">
+    <h1 id="todayhead">Today</h1>
+    <p class="firewall">🔒 Everything here lives on your box. Nothing leaves your home.</p>
+    <div id="reminders" class="list"></div>
+  </section>
+
+  <section class="tab hide" id="vault">
+    <h1>My Vault</h1>
+    <p class="sub">Your records, in your own home. Tap a card to open it.</p>
+    <div id="sections" class="grid"></div>
+    <article id="viewer" class="viewer hide"><button id="closeView" class="back">← Back</button><div id="viewerBody"></div></article>
+  </section>
+
+  <section class="tab hide" id="helper">
+    <h1>Ask the helper</h1>
+    <p class="sub">It organizes — it never diagnoses. Runs on your own box; nothing leaves home.</p>
+    <form id="askForm" class="card">
+      <label>Which doctor?<input name="doctor" placeholder="e.g. Dr. G (podiatry)"></label>
+      <label>What's the visit about?<input name="reason" placeholder="e.g. diabetic foot appointment"></label>
+      <button type="submit">Prep my questions →</button>
+      <p class="note" id="askNote"></p>
+    </form>
+    <article id="askOut" class="card out hide"></article>
+  </section>
+
+  <section class="tab hide" id="care">
+    <h1>Ask for help</h1>
+    <p class="sub">A ride, diabetic shoes, supplies — tell us what you need. We're opening our doors.</p>
+    <form id="careForm" class="card">
+      <label>What do you need?
+        <select name="need">
+          <option>A ride to the doctor</option><option>Diabetic shoes</option>
+          <option>Foot/wound supplies</option><option>Glucose / diabetic supplies</option>
+          <option>A healthy food box</option><option>Help setting things up</option><option>Something else</option>
+        </select></label>
+      <label>Anything we should know?<textarea name="details" rows="3" placeholder="A few words is plenty."></textarea></label>
+      <button type="submit">Send my request →</button>
+      <p class="note" id="careNote"></p>
+    </form>
+  </section>
+
+  <section class="tab hide" id="proof">
+    <h1>My Receipts</h1>
+    <p class="sub">A plain record of everything that happened — proof it all stayed on your box.</p>
+    <div id="receipts" class="list"></div>
+  </section>
+
+</main>
+<footer class="foot">My LocalDiabetic · a hand on your shoulder · everything stays home</footer>
+<script src="app.js"></script>
+</body>
+</html>
