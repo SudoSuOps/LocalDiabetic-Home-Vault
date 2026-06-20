@@ -41,6 +41,56 @@ No `pip install`. Python 3.8+ standard library only.
 
 ---
 
+## The safety net — acknowledge & escalate
+
+A reminder can become a **safety net** for someone living alone. Add an `escalate`
+block: if the reminder isn't acknowledged within `after_minutes`, the engine sends a
+**generic check-in** to a family helper's phone — *"Mom's morning reminder hasn't been
+acknowledged yet. Could you reach her?"* Never the medical detail.
+
+**Acknowledging:**
+```bash
+python3 ld_remind.py --ack morning-meds              # "I'm on it"
+python3 ld_remind.py --ack morning-meds --by jane    # a helper acked for them
+python3 ld_remind.py --pending                        # what's awaiting ack / escalated
+```
+*(`--ack` is the primitive. A future phone tap-to-ack button or dashboard simply calls
+this same command — the safety-net mechanism is built and proven today.)*
+
+**How it flows each tick:**
+1. Reminder fires → marked *pending ack* with a deadline (`fired_at + after_minutes`).
+2. If acknowledged before the deadline → an **ack receipt** records who and how fast.
+3. If the deadline passes with no ack → **escalate once** to the named helper(s),
+   mint an **escalation receipt**. No double-escalation.
+
+**Helpers** live in a `helpers` block in `reminders.json`, each with a `webhook_url`
+(point it at *their* ntfy topic). A helper with no URL still gets logged on the box.
+Escalation text is off-box, so it passes the same PHI backstop — keep it about
+acknowledgment, not medicine.
+
+```json
+"helpers": [
+  { "id": "daughter-jane", "name": "Jane", "webhook_url": "http://your-nas.local:8080/ntfy/jane" }
+],
+"reminders": [
+  {
+    "id": "morning-meds",
+    "nudge": "Good morning — morning routine reminder ⏰",
+    "schedule": "daily@07:30",
+    "channels": ["console", "file", "webhook"],
+    "escalate": {
+      "after_minutes": 45,
+      "to": ["daughter-jane"],
+      "nudge": "Check-in: Mom's morning reminder hasn't been acknowledged yet. Could you reach her?"
+    }
+  }
+]
+```
+
+A reminder with **no** `escalate` block behaves exactly as before — fire and done.
+
+---
+
 ## Reminder format
 
 Each reminder in `reminders.json`:
@@ -114,12 +164,12 @@ and on-box log still work. **Local-only is a fully supported mode.**
 
 ---
 
-## Known limits (v0.1, honest)
+## Known limits (v0.2, honest)
 
 - Tick-based: a reminder fires on the first run **after** its scheduled time, within
   `grace_hours`. If your scheduler runs every 5 minutes, a nudge can be up to 5 min late.
-- No snooze / acknowledge yet — a reminder fires once per occurrence. Ack + escalation
-  ("nudge a family helper if not acknowledged") is a Phase 2.1 candidate.
+- Escalation fires **once** per occurrence (no repeat-until-reached ladder yet).
+- `--ack` is a CLI/automation primitive; a phone tap-to-ack button is a later UI layer.
 - `webhook` delivery is best-effort and fails open; it does not retry.
 
 ---

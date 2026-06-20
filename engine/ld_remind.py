@@ -5,9 +5,10 @@ LocalDiabetic Reminder Engine — "the Nudge"
 
 The second half of the box: Vault + Nudge.
 
-This engine sits ON TOP of the Home Vault folders and fires gentle, on-time
-reminders — foot check, medications, supply reorders, appointments — to the
-local box and (optionally) to a phone/watch over a bridge you own.
+Fires gentle, on-time reminders — foot check, medications, supply reorders,
+appointments — to the local box and (optionally) to a phone/watch over a
+bridge you own. If a reminder isn't acknowledged in time, it escalates to a
+family helper so no one living alone falls through the cracks.
 
 THE INVARIANT, ENFORCED STRUCTURALLY
 ------------------------------------
@@ -17,24 +18,37 @@ detail (which med, which dose, which wound) stays in the vault as a pointer
 (`vault_ref`) the user follows ON THE BOX. PHI cannot leak because the engine
 never loads PHI in the first place.
 
-Off-box channels (a webhook to your phone) carry ONLY the declared generic
-nudge. Local channels (console, on-box log) may show the title and pointer.
+Off-box channels (a webhook to your phone, or a family helper's phone) carry
+ONLY declared generic text. Local channels (console, on-box log) may show the
+title and pointer.
 
-Every fired reminder mints a receipt into ../14-receipts/ proving what fired,
-whether anything left the vault, and that no diagnosis was given.
+ACK + ESCALATION (the safety net)
+---------------------------------
+A reminder may declare an `escalate` block. When it fires it becomes "pending
+ack" with a deadline. The person (or a future tap-to-ack UI / a helper) runs:
+    python3 ld_remind.py --ack <id>
+If the deadline passes with no ack, the engine notifies the named family
+helper(s) with a generic check-in message — never medical detail.
+
+RECEIPTS
+--------
+Every fire, every ack, every escalation mints a receipt into ../14-receipts/
+proving what happened, whether anything left the vault, and that no diagnosis
+was given.
 
 FAIL OPEN
 ---------
-Every channel is wrapped so a failure NEVER blocks the others. The local log
-is the always-works rail and takes precedence — a dead phone bridge can never
-stop the foot-check reminder from landing on the box. (Locked doctrine:
-optional components in a delivery path fail open.)
+Every channel is isolated so a failure NEVER blocks the others. The local log
+is the always-works rail — a dead phone bridge can never stop the foot-check
+from landing on the box, nor stop a helper escalation from being logged.
 
 USAGE
 -----
-    python3 ld_remind.py                 # one tick: fire everything due now
-    python3 ld_remind.py --dry-run       # show what WOULD fire, change nothing
+    python3 ld_remind.py                 # one tick: escalate overdue, fire due
+    python3 ld_remind.py --dry-run       # show what WOULD happen, change nothing
     python3 ld_remind.py --at 2026-06-20T08:00   # simulate a time (testing)
+    python3 ld_remind.py --ack foot-check [--by jane]   # acknowledge a reminder
+    python3 ld_remind.py --pending       # show what's awaiting ack / escalated
     python3 ld_remind.py --list          # list configured reminders
     python3 ld_remind.py --config path   # use a different config
 
@@ -61,11 +75,11 @@ RECEIPTS_DIR = os.path.join(VAULT_ROOT, "14-receipts")
 
 WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
-# Off-box channels carry only the declared generic nudge — never title/detail.
+# Off-box channels carry only declared generic text — never title/detail.
 OFF_BOX_CHANNELS = {"webhook"}
 
 # A backstop scan. The real protection is that the engine never loads PHI;
-# this just flags an author who accidentally put detail in a generic nudge.
+# this just flags an author who accidentally put detail in a generic message.
 PHI_HINTS = [
     "insulin", "units", "mg", "ml", "dose", "glucose", "a1c", "bp ",
     "blood pressure", "metformin", "lantus", "humalog", "novolog",
@@ -82,7 +96,7 @@ def load_config(path):
         )
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    return cfg.get("reminders", [])
+    return cfg.get("reminders", []), cfg.get("helpers", [])
 
 
 def load_state():
@@ -101,6 +115,15 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
+def local_log(line):
+    try:
+        os.makedirs(STATE_DIR, exist_ok=True)
+        with open(LOCAL_LOG, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass  # the on-box log itself fails open
+
+
 # ── Schedule parsing & due logic ─────────────────────────────────────────────
 def parse_hhmm(s):
     h, m = s.split(":")
@@ -110,9 +133,6 @@ def parse_hhmm(s):
 def occurrence_for(reminder, now):
     """
     Return (is_due, occurrence_key) for a reminder at time `now`.
-
-    occurrence_key uniquely identifies the specific scheduled firing so we
-    fire each occurrence exactly once. State stores the last fired key.
 
     Supported schedules:
       daily@HH:MM
@@ -134,8 +154,7 @@ def occurrence_for(reminder, now):
     if kind == "weekly":
         days = [d.strip().upper() for d in parts[1].split(",")]
         h, m = parse_hhmm(parts[2])
-        today = WEEKDAYS[now.weekday()]
-        if today not in days:
+        if WEEKDAYS[now.weekday()] not in days:
             return (False, None)
         due = now.replace(hour=h, minute=m, second=0, microsecond=0)
         key = due.strftime("%Y-%m-%dT%H:%M")
@@ -152,13 +171,11 @@ def occurrence_for(reminder, now):
             last_d = datetime.strptime(last, "%Y-%m-%d").date()
             if (now.date() - last_d).days < n:
                 return (False, None)
-        key = now.strftime("%Y-%m-%d")
-        return (True, key)
+        return (True, now.strftime("%Y-%m-%d"))
 
     if kind == "once":
         due = datetime.strptime(parts[1] + " " + parts[2], "%Y-%m-%d %H:%M")
         key = due.strftime("%Y-%m-%dT%H:%M")
-        # one-shot: fire from due time up to grace; key never repeats
         return (due <= now <= due + grace, key)
 
     sys.stderr.write(f"[warn] reminder {reminder.get('id')}: unknown schedule '{sched}'\n")
@@ -167,63 +184,58 @@ def occurrence_for(reminder, now):
 
 # ── PHI guard ────────────────────────────────────────────────────────────────
 def scan_phi(text):
-    low = text.lower()
+    low = (text or "").lower()
     return [h.strip() for h in PHI_HINTS if h in low]
 
 
-def off_box_payload(reminder):
-    """The ONLY thing allowed to leave the box: the declared generic nudge."""
-    return reminder["nudge"]
+# ── Low-level delivery (fails open at the caller) ────────────────────────────
+def post_webhook(url, payload, title="LocalDiabetic"):
+    """POST a plain-text payload to an off-box bridge. Caller handles failure."""
+    data = payload.encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    # HTTP headers are latin-1; keep the Title ASCII so a stray dash/emoji
+    # can never break delivery. The body (utf-8) carries the real text.
+    safe_title = title.encode("ascii", "ignore").decode() or "LocalDiabetic"
+    req.add_header("Title", safe_title)       # generic, no PHI
+    req.add_header("Content-Type", "text/plain; charset=utf-8")
+    with urllib.request.urlopen(req, timeout=4) as resp:
+        return 200 <= resp.status < 300
 
 
-# ── Channels (each fails open) ───────────────────────────────────────────────
+# ── Channels for a person's own reminders ────────────────────────────────────
 def ch_console(reminder, on_box_text):
     print(on_box_text, flush=True)
     return True
 
 
 def ch_file(reminder, on_box_text):
-    os.makedirs(STATE_DIR, exist_ok=True)
-    with open(LOCAL_LOG, "a", encoding="utf-8") as f:
-        f.write(on_box_text + "\n")
+    local_log(on_box_text)
     return True
 
 
 def ch_webhook(reminder, _on_box_text):
-    """Off-box. Sends ONLY the generic nudge. Times out fast, never raises up."""
+    """Off-box. Sends ONLY the generic nudge — never title/detail/pointer."""
     url = reminder.get("webhook_url") or os.environ.get("LD_WEBHOOK_URL")
     if not url:
         raise RuntimeError("no webhook_url configured")
-    payload = off_box_payload(reminder)
-    data = payload.encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Title", "LocalDiabetic")  # generic, no PHI
-    req.add_header("Content-Type", "text/plain; charset=utf-8")
-    with urllib.request.urlopen(req, timeout=4) as resp:
-        return 200 <= resp.status < 300
+    return post_webhook(url, reminder["nudge"])
 
 
 CHANNELS = {"console": ch_console, "file": ch_file, "webhook": ch_webhook}
 
 
 def dispatch(reminder, channels, now, dry_run):
-    """
-    Fire a reminder across its channels, fail-open. Returns a result dict
-    describing exactly what happened (used for the receipt).
-    """
+    """Fire a reminder across its channels, fail-open. Returns a result dict."""
     title = reminder.get("title", reminder["id"])
     nudge = reminder["nudge"]
     vault_ref = reminder.get("vault_ref")
-    phi_sensitive = reminder.get("phi_sensitive", False)
 
-    # On-box text may include the title + pointer (detail stays local).
     on_box_text = f"🐝 {now.strftime('%H:%M')}  {title} — {nudge}"
     if vault_ref:
         on_box_text += f"  ▸ {vault_ref}"
 
     left_vault = False
     delivered, failed = [], []
-
     for name in channels:
         fn = CHANNELS.get(name)
         if fn is None:
@@ -236,17 +248,14 @@ def dispatch(reminder, channels, now, dry_run):
             continue
         try:
             ok = fn(reminder, on_box_text)
-            (delivered if ok else failed).append(
-                name if ok else {"channel": name, "error": "non-2xx/false"}
-            )
+            delivered.append(name) if ok else failed.append({"channel": name, "error": "non-2xx/false"})
             if ok and name in OFF_BOX_CHANNELS:
                 left_vault = True
-        except Exception as e:  # FAIL OPEN — never let one channel kill the rest
+        except Exception as e:  # FAIL OPEN
             failed.append({"channel": name, "error": str(e)})
 
     return {
         "title": title,
-        "phi_sensitive": phi_sensitive,
         "left_the_vault": left_vault,
         "off_box_payload": nudge if left_vault else None,
         "delivered": delivered,
@@ -255,11 +264,61 @@ def dispatch(reminder, channels, now, dry_run):
     }
 
 
+# ── Escalation to family helpers ─────────────────────────────────────────────
+def escalate_to_helpers(reminder, helpers_by_id, now, dry_run):
+    """
+    Notify the family helper(s) named in reminder['escalate']['to'] with the
+    generic escalation text. Off-box and consent-based (the user listed the
+    helper and set the escalate block). Same PHI rules apply. Fails open.
+    """
+    esc = reminder["escalate"]
+    text = esc["nudge"]
+    phi = scan_phi(text)
+    targets = esc.get("to", [])
+    delivered, failed = [], []
+
+    if phi:
+        sys.stderr.write(
+            f"[FLAG] reminder '{reminder['id']}': escalation text looks like PHI {phi} "
+            f"— refusing off-box send. Keep escalation text about acknowledgment, not medicine.\n"
+        )
+
+    for hid in targets:
+        helper = helpers_by_id.get(hid)
+        name = helper.get("name", hid) if helper else hid
+        local_log(f"⚠️  ESCALATION → {name}: {text}")  # always logged on-box
+        if dry_run:
+            delivered.append(hid)
+            continue
+        if helper is None:
+            failed.append({"helper": hid, "error": "unknown helper id"})
+            continue
+        url = helper.get("webhook_url") or os.environ.get("LD_HELPER_WEBHOOK_URL")
+        if not url:
+            failed.append({"helper": hid, "error": "no webhook_url (logged on-box only)"})
+            continue
+        if phi:
+            failed.append({"helper": hid, "error": "refused: PHI in escalation text"})
+            continue
+        try:
+            ok = post_webhook(url, text, title="LocalDiabetic check-in")
+            delivered.append(hid) if ok else failed.append({"helper": hid, "error": "non-2xx"})
+        except Exception as e:  # FAIL OPEN
+            failed.append({"helper": hid, "error": str(e)})
+
+    return {"text": text, "phi": phi, "delivered": delivered, "failed": failed}
+
+
 # ── Receipts ─────────────────────────────────────────────────────────────────
-def mint_receipt(reminder, result, now):
+def _write_receipt(name_stem, receipt, now):
     os.makedirs(RECEIPTS_DIR, exist_ok=True)
-    phi_flags = scan_phi(result["off_box_payload"]) if result["off_box_payload"] else []
-    receipt = {
+    fname = f"{name_stem}-{now.strftime('%Y%m%dT%H%M%S')}.json"
+    with open(os.path.join(RECEIPTS_DIR, fname), "w", encoding="utf-8") as f:
+        json.dump(receipt, f, indent=2)
+
+
+def mint_fire_receipt(reminder, result, now):
+    _write_receipt(f"reminder-{reminder['id']}", {
         "kind": "reminder-fired",
         "reminder_id": reminder["id"],
         "title": result["title"],
@@ -268,35 +327,86 @@ def mint_receipt(reminder, result, now):
         "channels_failed": result["failed"],
         "left_the_vault": result["left_the_vault"],
         "off_box_payload": result["off_box_payload"],
-        "phi_in_off_box_payload": phi_flags,          # MUST be [] — backstop
-        "vault_ref": result["vault_ref"],             # pointer, stayed local
+        "phi_in_off_box_payload": scan_phi(result["off_box_payload"]),
+        "vault_ref": result["vault_ref"],
         "diagnosis_given": False,
-        "engine": "ld_remind/0.1",
-    }
-    fname = f"reminder-{reminder['id']}-{now.strftime('%Y%m%dT%H%M%S')}.json"
-    with open(os.path.join(RECEIPTS_DIR, fname), "w", encoding="utf-8") as f:
-        json.dump(receipt, f, indent=2)
-    return receipt, phi_flags
+        "engine": "ld_remind/0.2",
+    }, now)
 
 
-# ── Main tick ────────────────────────────────────────────────────────────────
-def tick(reminders, now, dry_run):
-    state = load_state()
+def mint_ack_receipt(rid, pending, by, now, response_min):
+    _write_receipt(f"ack-{rid}", {
+        "kind": "reminder-acknowledged",
+        "reminder_id": rid,
+        "occurrence": pending["occurrence"],
+        "fired_at": pending["fired_at"],
+        "acknowledged_at": now.strftime("%Y-%m-%dT%H:%M:%S"),
+        "acknowledged_by": by,
+        "response_minutes": response_min,
+        "escalated_before_ack": pending.get("escalated", False),
+        "diagnosis_given": False,
+        "engine": "ld_remind/0.2",
+    }, now)
+
+
+def mint_escalation_receipt(rid, pending, esc_result, now):
+    _write_receipt(f"escalation-{rid}", {
+        "kind": "reminder-escalated",
+        "reminder_id": rid,
+        "occurrence": pending["occurrence"],
+        "fired_at": pending["fired_at"],
+        "deadline": pending["deadline"],
+        "escalated_at": now.strftime("%Y-%m-%dT%H:%M:%S"),
+        "helpers_notified": esc_result["delivered"],
+        "helpers_failed": esc_result["failed"],
+        "left_the_vault": True,
+        "off_box_payload": esc_result["text"],
+        "phi_in_off_box_payload": esc_result["phi"],
+        "diagnosis_given": False,
+        "engine": "ld_remind/0.2",
+    }, now)
+
+
+# ── Tick: escalate overdue, then fire due ────────────────────────────────────
+def process_escalations(reminders, helpers_by_id, state, now, dry_run):
+    count = 0
+    for r in reminders:
+        if "escalate" not in r:
+            continue
+        st = state.get(r["id"], {})
+        p = st.get("pending")
+        if not p or p.get("escalated"):
+            continue
+        if now <= datetime.fromisoformat(p["deadline"]):
+            continue  # still within the ack window
+        esc = escalate_to_helpers(r, helpers_by_id, now, dry_run)
+        prefix = "[dry-run] would escalate" if dry_run else "ESCALATED"
+        print(f"{prefix}: {r['id']} → helpers={esc['delivered']} "
+              f"failed={[f.get('helper') for f in esc['failed']]}", flush=True)
+        if not dry_run:
+            mint_escalation_receipt(r["id"], p, esc, now)
+            p["escalated"] = True
+            st["pending"] = p
+            state[r["id"]] = st
+        count += 1
+    return count
+
+
+def fire_due(reminders, state, now, dry_run):
     fired = 0
     for r in reminders:
         rid = r["id"]
-        # thread interval state in for the due check
         r["_last_fire_date"] = state.get(rid, {}).get("last_fire_date")
 
-        # Backstop: refuse to even configure a nudge that carries PHI off-box.
-        if set(r.get("channels", [])) & OFF_BOX_CHANNELS:
+        channels = list(r.get("channels", ["console", "file"]))
+        if set(channels) & OFF_BOX_CHANNELS:
             leak = scan_phi(r["nudge"])
             if leak:
                 sys.stderr.write(
                     f"[FLAG] reminder '{rid}': off-box nudge looks like PHI {leak} "
                     f"— refusing off-box delivery. Make the nudge generic.\n"
                 )
-                r = dict(r, channels=[c for c in r["channels"] if c not in OFF_BOX_CHANNELS])
+                channels = [c for c in channels if c not in OFF_BOX_CHANNELS]
 
         is_due, occ = occurrence_for(r, now)
         if not is_due:
@@ -304,47 +414,114 @@ def tick(reminders, now, dry_run):
         if state.get(rid, {}).get("last_occurrence") == occ:
             continue  # already fired this occurrence
 
-        result = dispatch(r, r.get("channels", ["console", "file"]), now, dry_run)
+        result = dispatch(r, channels, now, dry_run)
         prefix = "[dry-run] would fire" if dry_run else "fired"
         leftmark = " → off-box" if result["left_the_vault"] else " (local only)"
+        esc_note = "  [escalates if no ack]" if "escalate" in r else ""
         print(f"{prefix}: {rid}{leftmark}  delivered={result['delivered']} "
-              f"failed={[f.get('channel') for f in result['failed']]}", flush=True)
+              f"failed={[f.get('channel') for f in result['failed']]}{esc_note}", flush=True)
 
         if not dry_run:
-            _, phi_flags = mint_receipt(r, result, now)
-            if phi_flags:
-                sys.stderr.write(f"[FLAG] {rid}: PHI in off-box payload {phi_flags}\n")
-            state[rid] = {
-                "last_occurrence": occ,
-                "last_fire_date": now.strftime("%Y-%m-%d"),
-            }
+            mint_fire_receipt(r, result, now)
+            entry = state.get(rid, {})
+            entry["last_occurrence"] = occ
+            entry["last_fire_date"] = now.strftime("%Y-%m-%d")
+            if "escalate" in r:
+                after = r["escalate"].get("after_minutes", 30)
+                deadline = now + timedelta(minutes=after)
+                entry["pending"] = {
+                    "occurrence": occ,
+                    "fired_at": now.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "deadline": deadline.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "escalated": False,
+                }
+            state[rid] = entry
         fired += 1
-
-    if not dry_run:
-        save_state(state)
-    if fired == 0:
-        print("nothing due", flush=True)
     return fired
 
 
+def tick(reminders, helpers, now, dry_run):
+    state = load_state()
+    helpers_by_id = {h["id"]: h for h in helpers}
+    esc = process_escalations(reminders, helpers_by_id, state, now, dry_run)
+    fired = fire_due(reminders, state, now, dry_run)
+    if not dry_run:
+        save_state(state)
+    if fired == 0 and esc == 0:
+        print("nothing due", flush=True)
+
+
+# ── Acknowledge ──────────────────────────────────────────────────────────────
+def acknowledge(rid, by, now):
+    state = load_state()
+    st = state.get(rid, {})
+    p = st.get("pending")
+    if not p:
+        print(f"no pending reminder to acknowledge for '{rid}'", flush=True)
+        return
+    fired = datetime.strptime(p["fired_at"], "%Y-%m-%dT%H:%M:%S")
+    response_min = round((now - fired).total_seconds() / 60, 1)
+    mint_ack_receipt(rid, p, by, now, response_min)
+    local_log(f"✓ ACK {rid} by {by} ({response_min} min)")
+    st.pop("pending", None)
+    st["last_ack_occurrence"] = p["occurrence"]
+    state[rid] = st
+    save_state(state)
+    extra = " (was already escalated)" if p.get("escalated") else ""
+    print(f"✓ acknowledged '{rid}' by {by} — {response_min} min after it fired{extra}", flush=True)
+
+
+def show_pending(now):
+    state = load_state()
+    any_p = False
+    for rid, st in state.items():
+        p = st.get("pending")
+        if not p:
+            continue
+        any_p = True
+        if p.get("escalated"):
+            print(f"  {rid}: ⚠️  ESCALATED (fired {p['fired_at']}, deadline {p['deadline']})")
+        else:
+            overdue = now > datetime.strptime(p["deadline"], "%Y-%m-%dT%H:%M:%S")
+            mark = "OVERDUE — will escalate next tick" if overdue else "awaiting ack"
+            print(f"  {rid}: {mark} (escalates at {p['deadline']})")
+    if not any_p:
+        print("  nothing pending acknowledgment")
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="LocalDiabetic Reminder Engine (the Nudge)")
     ap.add_argument("--config", default=DEFAULT_CONFIG)
-    ap.add_argument("--dry-run", action="store_true", help="show what would fire; change nothing")
+    ap.add_argument("--dry-run", action="store_true", help="show what would happen; change nothing")
     ap.add_argument("--at", help="simulate a time, ISO e.g. 2026-06-20T08:00")
     ap.add_argument("--list", action="store_true", help="list configured reminders and exit")
+    ap.add_argument("--ack", metavar="ID", help="acknowledge a pending reminder")
+    ap.add_argument("--by", default="user", help="who is acknowledging (for the receipt)")
+    ap.add_argument("--pending", action="store_true", help="show reminders awaiting ack / escalated")
     args = ap.parse_args()
 
-    reminders = load_config(args.config)
+    now = datetime.strptime(args.at, "%Y-%m-%dT%H:%M") if args.at else datetime.now()
+
+    if args.pending:
+        show_pending(now)
+        return
+    if args.ack:
+        acknowledge(args.ack, args.by, now)
+        return
+
+    reminders, helpers = load_config(args.config)
 
     if args.list:
         for r in reminders:
             ch = ",".join(r.get("channels", []))
-            print(f"  {r['id']:<18} {r['schedule']:<28} [{ch}]  {r.get('title','')}")
+            esc = "  ⤴ escalates" if "escalate" in r else ""
+            print(f"  {r['id']:<18} {r['schedule']:<28} [{ch}]  {r.get('title','')}{esc}")
+        if helpers:
+            print("  helpers: " + ", ".join(h.get("id") for h in helpers))
         return
 
-    now = datetime.strptime(args.at, "%Y-%m-%dT%H:%M") if args.at else datetime.now()
-    tick(reminders, now, args.dry_run)
+    tick(reminders, helpers, now, args.dry_run)
 
 
 if __name__ == "__main__":

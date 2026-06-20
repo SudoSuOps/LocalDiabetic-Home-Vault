@@ -1,6 +1,17 @@
 {
   "_comment": "Copy this file to reminders.json and edit it. reminders.json is gitignored so your schedule stays on your box. The 'nudge' field is the ONLY text that may leave the box (to a phone/watch) — keep it generic, never put a medication name, dose, or number in it. The detail lives in the vault file named by 'vault_ref', which you open on the box.",
 
+  "_comment_escalate": "Add an 'escalate' block to make a reminder a safety net: if it isn't acknowledged within 'after_minutes', a generic check-in is sent to the named family helper(s). Acknowledge with: python3 ld_remind.py --ack <id>. The escalation text is also off-box — keep it about acknowledgment, not medicine.",
+
+  "helpers": [
+    {
+      "id": "daughter-jane",
+      "name": "Jane",
+      "webhook_url": "http://your-nas.local:8080/ntfy/jane",
+      "_comment": "Point webhook_url at this helper's own ntfy topic (or any push URL). If omitted, escalations to this helper are logged on-box only."
+    }
+  ],
+
   "reminders": [
     {
       "id": "foot-check",
@@ -19,7 +30,12 @@
       "vault_ref": "01-medications/MEDICATION-LIST.md",
       "channels": ["console", "file", "webhook"],
       "category": "medication",
-      "phi_sensitive": true
+      "phi_sensitive": true,
+      "escalate": {
+        "after_minutes": 45,
+        "to": ["daughter-jane"],
+        "nudge": "Check-in: Mom's morning reminder hasn't been acknowledged yet. Could you reach her?"
+      }
     },
     {
       "id": "evening-meds",
