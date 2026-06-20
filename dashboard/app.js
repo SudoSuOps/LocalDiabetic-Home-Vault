@@ -113,10 +113,14 @@ $("#careForm").onsubmit = async e => {
 /* ---- Receipts ---- */
 async function loadReceipts() {
   const {receipts} = await j("/api/receipts");
+  const tag = r => (r.kind === "reminder-fired" && r.left_premises)
+    ? `<div class="tag" style="color:var(--blue)">📱 sent to your phone · no records</div>`
+    : (r.left_premises
+        ? `<div class="tag" style="color:var(--blue)">📱 generic nudge · no records</div>`
+        : `<div class="tag" style="color:var(--green)">🔒 stayed on your box ✓</div>`);
   $("#receipts").innerHTML = receipts.length ? receipts.map(r => `<div class="rcard">
       <div><div class="t" style="font-size:1.02rem">${esc(r.what)}</div><div class="muted">${esc(r.when)}</div></div>
-      <div class="tag" style="color:${r.left_premises?'var(--red)':'var(--green)'}">${r.left_premises?'left box':'stayed on your box ✓'}</div>
-    </div>`).join("") : `<p class="muted">No activity yet.</p>`;
+      ${tag(r)}</div>`).join("") : `<p class="muted">No activity yet.</p>`;
 }
 
 loadToday();
