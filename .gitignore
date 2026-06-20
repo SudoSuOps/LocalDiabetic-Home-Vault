@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────
+# LocalDiabetic Home Vault — PHI GUARD
+# This repo is a TEMPLATE. Real personal health records must NEVER
+# be committed. Enforces HARD-INVARIANT.md at the git layer:
+# raw PHI never leaves the local box.
+# ─────────────────────────────────────────────────────────────
+
+# Scanned / photographed documents (records, cards, letters)
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.heic
+*.tif
+*.tiff
+*.bmp
+*.gif
+*.webp
+
+# Office / exported records
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.csv
+*.numbers
+*.pages
+
+# Anything a user marks as their own filled-in copy
+*-MINE.md
+*-FILLED.md
+*.private.md
+/**/my-*.md
+
+# Generated notes & receipts hold real activity — keep them local
+13-organized-notes/*
+!13-organized-notes/README.md
+14-receipts/*
+!14-receipts/README.md
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*~
+*.swp
+.vscode/
+.idea/
