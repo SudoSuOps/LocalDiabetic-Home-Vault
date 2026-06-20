@@ -44,7 +44,8 @@ SYSTEM = (
     "You DO NOT diagnose. You DO NOT give medical advice. You DO NOT change or suggest "
     "medications or doses. You organize information and explain things in plain, simple "
     "language a non-expert can follow. For anything medical, you tell the person to "
-    "confirm with their clinician. Keep it short, warm, and practical. No preamble."
+    "confirm with their clinician. Keep it short, warm, and practical. No preamble. "
+    "Output ONLY the final answer — do not show any reasoning or thinking."
 )
 
 # Backstop: phrases that look like the model slipped into diagnosing/prescribing.
@@ -59,7 +60,7 @@ ESCALATION = "\n\n— This is organization, not medical advice. Confirm anything
 
 def call_model(host, model, prompt, timeout=180):
     payload = {"model": model, "prompt": prompt, "system": SYSTEM, "stream": False,
-               "options": {"num_predict": 320, "temperature": 0.4}}
+               "options": {"num_predict": 768, "temperature": 0.4}}
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(host.rstrip("/") + "/api/generate", data=data, method="POST")
     req.add_header("Content-Type", "application/json")
@@ -67,10 +68,16 @@ def call_model(host, model, prompt, timeout=180):
     t0 = time.time()
     with urllib.request.urlopen(req, timeout=timeout) as r:
         out = json.loads(r.read() or b"{}")
-    text = (out.get("response") or "").strip()
-    # strip any <think> reasoning blocks (LFM2.5 etc.)
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    return text, round(time.time() - t0, 1)
+    return strip_reasoning(out.get("response") or ""), round(time.time() - t0, 1)
+
+
+def strip_reasoning(text):
+    """Reasoning models (LFM2.5 etc.) emit <think>…</think>. Keep only the answer."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)   # closed blocks
+    if "</think>" in text:                                            # answer is after the last close
+        text = text.rsplit("</think>", 1)[-1]
+    text = re.sub(r"<think>.*$", "", text, flags=re.DOTALL)           # drop truncated/unclosed think
+    return text.strip()
 
 
 def scan_diagnosis(text):
