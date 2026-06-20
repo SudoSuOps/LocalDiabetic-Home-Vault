@@ -17,7 +17,31 @@ document.querySelectorAll(".bigtabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("hide", t.id !== b.dataset.tab));
   if (b.dataset.tab === "proof") loadReceipts();
   if (b.dataset.tab === "vault") loadSections();
+  if (b.dataset.tab === "life") loadEvents();
   window.scrollTo(0, 0);
+});
+
+/* ---- Life events ---- */
+const EV_ICON = { fridge:"🧊", help:"🆘", meds:"💊", foot:"👣", glucose:"🩸", safety:"🛡️",
+  device:"🔌", note:"📝", mood:"💛", milestone:"⭐", appointment:"📅", supply:"🛒" };
+async function loadEvents() {
+  const { events } = await j("/api/events");
+  $("#events").innerHTML = events.length ? events.map(e => `<div class="rcard ev-${esc(e.severity)}">
+      <div><div class="t">${EV_ICON[e.type] || "•"} ${esc(e.title)}</div>
+        ${e.message ? `<div class="n">${esc(e.message)}</div>` : ""}
+        <div class="muted">${esc(e.at).replace("T"," · ")} · ${esc(e.source)}</div></div>
+    </div>`).join("") : `<p class="muted">No life events yet. Add a note above, or your home devices will fill this in.</p>`;
+}
+const nf = $("#noteForm");
+nf && nf.addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target, r = $("#noteResult");
+  r.className = "note"; r.textContent = "Saving…";
+  try {
+    await j("/api/event", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ type:f.type.value, title:f.type.options[f.type.selectedIndex].text.replace(/^[^ ]+ /,""), message:f.message.value, severity:"info", source:"me" }) });
+    r.className = "note ok"; r.textContent = "Added to your life log 🐝"; f.reset(); loadEvents();
+  } catch { r.className = "note bad"; r.textContent = "Couldn't save — try again."; }
 });
 
 /* ---- tiny markdown -> html (headers, bold, lists, tables, hr) ---- */

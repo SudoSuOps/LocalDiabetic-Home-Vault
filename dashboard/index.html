@@ -20,6 +20,7 @@
 
 <nav class="bigtabs" aria-label="Sections">
   <button data-tab="today" class="on">📋 Today</button>
+  <button data-tab="life">📰 Life</button>
   <button data-tab="vault">📂 My Vault</button>
   <button data-tab="helper">💬 Helper</button>
   <button data-tab="care">❤️ Care</button>
@@ -32,6 +33,25 @@
     <h1 id="todayhead">Today</h1>
     <p class="firewall">🔒 Everything here lives on your box. Nothing leaves your home.</p>
     <div id="reminders" class="list"></div>
+  </section>
+
+  <section class="tab hide" id="life">
+    <h1>Life</h1>
+    <p class="sub">What's happened lately — your home, your reminders, and your own notes. All on your box.</p>
+    <form id="noteForm" class="card">
+      <label>Add a note
+        <select name="type">
+          <option value="note">📝 A note</option>
+          <option value="mood">💛 How I'm feeling</option>
+          <option value="glucose">🩸 Glucose / sugar note</option>
+          <option value="appointment">📅 Doctor / appointment</option>
+          <option value="milestone">⭐ A milestone</option>
+        </select></label>
+      <textarea name="message" rows="2" placeholder="A few words — for you and your family." required></textarea>
+      <button type="submit">Add to my life log</button>
+      <p class="note" id="noteResult"></p>
+    </form>
+    <div id="events" class="list"></div>
   </section>
 
   <section class="tab hide" id="vault">

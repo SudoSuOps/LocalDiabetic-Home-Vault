@@ -71,3 +71,9 @@ h1{font-size:1.9rem;margin:6px 0 10px}
 .out{margin-top:16px;white-space:pre-wrap;line-height:1.6}
 .muted{color:var(--soft);font-size:.9rem}
 .foot{text-align:center;color:var(--soft);padding:24px;border-top:1px solid var(--line)}
+
+/* life events */
+.rcard.ev-good{border-left:6px solid var(--green)}
+.rcard.ev-warn{border-left:6px solid var(--honey)}
+.rcard.ev-alert{border-left:6px solid var(--red)}
+.rcard.ev-info{border-left:6px solid var(--line)}

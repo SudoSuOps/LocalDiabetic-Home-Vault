@@ -121,6 +121,60 @@ def mint(kind, payload):
     return rec
 
 
+# ── Life events (the timeline) — fed by Home Assistant + manual notes ────────
+STATE = os.path.join(HERE, ".state")
+LIFE_LOG = os.path.join(STATE, "life_events.jsonl")
+# the only types we accept (keeps the firewall + the UI clean)
+EVENT_TYPES = {"fridge", "help", "meds", "foot", "glucose", "safety", "device",
+               "note", "mood", "milestone", "appointment", "supply"}
+
+
+def log_event(etype, title, message="", severity="info", source="dashboard"):
+    os.makedirs(STATE, exist_ok=True)
+    ev = {"type": etype if etype in EVENT_TYPES else "note",
+          "title": (title or "")[:140], "message": (message or "")[:400],
+          "severity": severity if severity in ("info", "good", "warn", "alert") else "info",
+          "source": source, "at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")}
+    with open(LIFE_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(ev) + "\n")
+    mint("life-event", ev)   # also leaves an on-box receipt
+    return ev
+
+
+def life_events(limit=40):
+    out = []
+    if os.path.exists(LIFE_LOG):
+        for line in reversed(open(LIFE_LOG, encoding="utf-8").read().splitlines()):
+            line = line.strip()
+            if line:
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    pass
+            if len(out) >= limit:
+                break
+    return out
+
+
+def notify_generic(message):
+    """Fire a GENERIC off-box push for an alert. Refuses anything that scans as PHI."""
+    url = os.environ.get("LD_WEBHOOK_URL")
+    if not url:
+        try:
+            for r in json.load(open(ld_remind.DEFAULT_CONFIG)).get("reminders", []):
+                if r.get("webhook_url"):
+                    url = r["webhook_url"]
+                    break
+        except Exception:
+            pass
+    if not url or ld_remind.scan_phi(message):   # firewall: never push PHI off-box
+        return False
+    try:
+        return ld_remind.post_webhook(url, message, title="LocalDiabetic")
+    except Exception:
+        return False
+
+
 class Dash(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -164,13 +218,33 @@ class Dash(BaseHTTPRequestHandler):
             return self._json({"key": key, "title": m[1], "icon": m[3], "file": used, "text": text})
         if u.path == "/api/receipts":
             return self._json({"receipts": receipts()})
+        if u.path == "/api/events":
+            return self._json({"events": life_events()})
         return self._static(u.path)
 
     def do_POST(self):
         u = urlparse(self.path)
+
+        # Home Assistant (and any local source) posts a life event here.
+        # Optional shared token: if LD_EVENT_TOKEN is set, require header X-LD-Token.
+        if u.path == "/api/event":
+            tok = os.environ.get("LD_EVENT_TOKEN")
+            if tok and self.headers.get("X-LD-Token") != tok:
+                return self._json({"error": "unauthorized"}, 401)
+            b = self._body()
+            ev = log_event(b.get("type", "device"), b.get("title", ""), b.get("message", ""),
+                           b.get("severity", "info"), b.get("source", "home-assistant"))
+            pushed = False
+            # an alert can also fire a GENERIC off-box nudge (firewall-checked)
+            if b.get("notify") and ev["severity"] in ("warn", "alert"):
+                pushed = notify_generic(b.get("nudge") or ev["title"])
+            return self._json({"ok": True, "event": ev, "pushed": pushed})
+
         if u.path == "/api/ack":
             b = self._body()
-            ld_remind.acknowledge(b.get("id", ""), b.get("by", "me"), datetime.now())
+            rid = b.get("id", "")
+            ld_remind.acknowledge(rid, b.get("by", "me"), datetime.now())
+            log_event("meds" if "med" in rid else "note", "Done ✓", f"Acknowledged: {rid}", "good", "dashboard")
             return self._json({"ok": True})
         if u.path == "/api/carepack":
             b = self._body()
@@ -181,6 +255,7 @@ class Dash(BaseHTTPRequestHandler):
             os.makedirs(os.path.dirname(cp), exist_ok=True)
             open(cp, "a", encoding="utf-8").write(line)
             mint("care-pack-request", {"need": need, "details": details, "status": "requested"})
+            log_event("supply", "Care-pack requested", need, "info", "dashboard")
             return self._json({"ok": True, "note": "Request saved on your box. We'll reach out as we open our doors."})
         if u.path == "/api/ask":
             if ld_helper is None:
